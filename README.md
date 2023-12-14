@@ -23,12 +23,12 @@ YT Cut Bot - это Telegram бот, который позволяет загр�
 
 1. Клонируйте этот репозиторий
 ```bash
-git clone https://github.com/yourusername/your-repo-name.git
+git clone https://github.com/AdamsGH/tg-youtube-downloader
 ```
 
 2. Перейдите в директорию проекта
 ```bash
-cd your-repo-name
+cd tg-youtube-downloader
 ```
 
 3. Создайте и заполните файл .env с вашими переменными окружения (TOKEN и ALLOWED_USER_IDS)
