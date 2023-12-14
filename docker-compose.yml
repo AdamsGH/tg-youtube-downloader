@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    image: youtube-downloader-telegram
+    volumes:
+      - .:/bot
+    environment:
+      - TOKEN
+      - ALLOWED_USER_IDS
