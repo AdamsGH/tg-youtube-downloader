@@ -4,6 +4,9 @@ import yt_dlp
 import subprocess
 import os
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 import re
@@ -18,6 +21,9 @@ logger = logging.getLogger(__name__)
 ALLOWED_USER_IDS = os.getenv('ALLOWED_USER_IDS').split(',')
 last_update_time = 0
 message_id = None
+
+# Создание сессии requests
+session = requests.Session()
 
 # Создание меню с кнопками для команд
 def help(update: Update, context: CallbackContext):
@@ -71,15 +77,30 @@ def create_callback(encoder, update, context, message_id):
 
 
 # Загрузка файла на temp.sh
-def upload_to_tempsh(file_path):
-    with open(file_path, 'rb') as file:
-        response = requests.post('https://temp.sh/upload', files={"file": file})
+def upload_to_tempsh(file_path, update: Update, context: CallbackContext):
+    try:
+        logging.info(f"Начало загрузки файла {file_path}")
+        with open(file_path, 'rb') as file:
+            encoder = MultipartEncoder(fields={'file': ('video.mp4', file)})
+            message = update.message.reply_text('Загрузка началась...')
+            message_id = message.message_id
+            monitor = MultipartEncoderMonitor(encoder, create_callback(encoder, update, context, message_id))
 
-    if response.status_code == 200:
-        return response.text
-    else:
+            for i in range(3):  # Попытка загрузки 3 раза
+                response = session.post('https://temp.sh/upload', data=monitor, headers={'Content-Type': monitor.content_type})
+                if response.status_code == 200:
+                    upload_url = response.text
+                    logging.info(f"Загрузка успешна, URL: {upload_url}")
+                    return upload_url
+                elif response.status_code == 502 and i < 2:  # Если сервер возвращает ошибку 502 и это не последняя попытка
+                    logging.warning(f"Не удалось загрузить {file_path}, код ответа сервера: {response.status_code}. Повторная попытка...")
+                    time.sleep(5)  # Пауза перед повторной попыткой
+                else:
+                    logging.error(f"Не удалось загрузить {file_path}, код ответа сервера: {response.status_code}")
+                    return None
+    except Exception as e:
+        logging.error(f"Не удалось загрузить {file_path}, ошибка: {str(e)}")
         return None
-
 
 # Загрузка видео с помощью yt_dlp
 def download_video(update: Update, context: CallbackContext, video_link):
@@ -132,11 +153,11 @@ def start(update: Update, context: CallbackContext):
 # Отправка или загрузка видео
 def send_or_upload_video(file_path, update: Update, context: CallbackContext):
     file_size = os.path.getsize(file_path)
-    if file_size <  200 * 1024 * 1024:  # 50MB
+    if file_size <  50 * 1024 * 1024:  # 50MB
         context.bot.send_video(chat_id=update.message.chat_id, video=open(file_path, 'rb'))
         logging.info(f"Video sent directly in chat {update.message.chat_id}")
     else:
-        upload_url = upload_to_tempsh(file_path)
+        upload_url = upload_to_tempsh(file_path, update, context)
         if upload_url is not None:
             context.bot.send_message(chat_id=update.message.chat_id, text=f"Файл слишком большой для отправки через Telegram. Вы можете скачать его по этой ссылке: {upload_url}")
             logging.info(f"Video uploaded to temp.sh and link sent in chat {update.message.chat_id}")
@@ -185,7 +206,7 @@ def download(update: Update, context: CallbackContext):
 
     video_link = args[0]
 
-    update.message.reply_text('Начало загрузки...')
+    # update.message.reply_text('Начало загрузки...')
     download_video(update, context, video_link)
 
     # Отправка загруженного видео
