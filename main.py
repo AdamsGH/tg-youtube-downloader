@@ -70,23 +70,15 @@ def create_callback(encoder, update, context, message_id):
     return callback
 
 
-# Загрузка файла на transfer.sh
-def upload_to_transfersh(file_path, update: Update, context: CallbackContext):
-    encoder = MultipartEncoder(
-        fields={
-            'file': ('video.mp4', open(file_path, 'rb')),
-        }
-    )
-    message = update.message.reply_text('Загрузка началась...')
-    message_id = message.message_id
-    monitor = MultipartEncoderMonitor(encoder, create_callback(encoder, update, context, message_id))
-    headers = {"Max-Downloads": "5", "Max-Days": "5", 'Content-Type': monitor.content_type}
-    response = requests.post('https://transfer.sh/', data=monitor, headers=headers)
+# Загрузка файла на temp.sh
+def upload_to_tempsh(file_path):
+    with open(file_path, 'rb') as file:
+        response = requests.post('https://temp.sh/upload', files={"file": file})
+
     if response.status_code == 200:
-        delete_link = response.headers.get('X-Url-Delete')
-        return response.text, delete_link
+        return response.text
     else:
-        return None, None
+        return None
 
 
 # Загрузка видео с помощью yt_dlp
@@ -138,22 +130,19 @@ def start(update: Update, context: CallbackContext):
 
 
 # Отправка или загрузка видео
-def send_or_upload_video(update: Update, context: CallbackContext, file_path):
+def send_or_upload_video(file_path, update: Update, context: CallbackContext):
     file_size = os.path.getsize(file_path)
-    if file_size > 200 * 1024 * 1024:  # Если размер файла больше 200MB
-        message = update.message.reply_text('Файл слишком большой для отправки через Telegram. Загружаю на transfer.sh...')
-        url, delete_link = upload_to_transfersh(file_path, update, context)
-        if url is not None:
-            delete_token = delete_link.split('/')[-1]  # Берем последнюю часть ссылки для удаления
-            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=message.message_id, text='Загрузка завершена.')
-            update.message.reply_text(f'Видео загружено на transfer.sh: {url}\nТокен для удаления: `{delete_token}`', parse_mode='Markdown')
-            logger.info(f'Uploaded video to transfer.sh: {url}\nDelete token: {delete_token}')
-        else:
-            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=message.message_id, text='Не удалось загрузить видео на transfer.sh.')
-            logger.error('Failed to upload video to transfer.sh.')
+    if file_size <  200 * 1024 * 1024:  # 50MB
+        context.bot.send_video(chat_id=update.message.chat_id, video=open(file_path, 'rb'))
+        logging.info(f"Video sent directly in chat {update.message.chat_id}")
     else:
-        with open(file_path, 'rb') as video:
-            context.bot.send_video(chat_id=update.message.chat_id, video=video)
+        upload_url = upload_to_tempsh(file_path)
+        if upload_url is not None:
+            context.bot.send_message(chat_id=update.message.chat_id, text=f"Файл слишком большой для отправки через Telegram. Вы можете скачать его по этой ссылке: {upload_url}")
+            logging.info(f"Video uploaded to temp.sh and link sent in chat {update.message.chat_id}")
+        else:
+            context.bot.send_message(chat_id=update.message.chat_id, text="Не удалось загрузить файл.")
+            logging.error(f"Failed to upload video from chat {update.message.chat_id}")
 
 # Обрезка видео
 def cut(update: Update, context: CallbackContext):
@@ -178,7 +167,7 @@ def cut(update: Update, context: CallbackContext):
     subprocess.run(cut_command, shell=True)
 
     # Загрузка обрезанного видео
-    send_or_upload_video(update, context, 'output_video.mp4')
+    send_or_upload_video('temp_video.mp4', update, context)
 
     # Очистка временных файлов
     os.remove('output_video.mp4')
@@ -200,7 +189,7 @@ def download(update: Update, context: CallbackContext):
     download_video(update, context, video_link)
 
     # Отправка загруженного видео
-    send_or_upload_video(update, context, 'temp_video.mp4')
+    send_or_upload_video('temp_video.mp4', update, context)
 
     # Очистка временного файла
     os.remove('temp_video.mp4')
@@ -223,4 +212,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
