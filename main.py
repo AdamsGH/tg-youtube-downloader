@@ -3,15 +3,12 @@ import time
 import yt_dlp
 import subprocess
 import os
-import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 import re
 from tqdm import tqdm
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
+import requests
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -27,17 +24,29 @@ session = requests.Session()
 
 # Создание меню с кнопками для команд
 def help(update: Update, context: CallbackContext):
-    keyboard = [
-        [InlineKeyboardButton("/cut", callback_data='1'),
-         InlineKeyboardButton("/download", callback_data='2')],
-    ]
+    """
+    Отправляет пользователю сообщение с описанием доступных команд.
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    update.message.reply_text('Выберите команду:', reply_markup=reply_markup)
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
+    help_text = (
+        "Доступные команды:\n"
+        "/start - Начать взаимодействие с ботом\n"
+        "/cut <video_link> <start_time> <duration> - Обрезать видео\n"
+        "/download <video_link> - Скачать видео\n"
+        "/help - Показать это сообщение"
+    )
+    update.message.reply_text(help_text)
 
 # Функция для обработки нажатий на кнопки
 def button(update: Update, context: CallbackContext):
+    """
+    Обрабатывает нажатия на кнопки в меню.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     query = update.callback_query
 
     query.answer()
@@ -49,6 +58,13 @@ def button(update: Update, context: CallbackContext):
 
 
 def check_user(update: Update, context: CallbackContext):
+    """
+    Проверяет, авторизован ли пользователь для использования бота.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    :return: True, если пользователь авторизован, иначе False.
+    """
     user_id = update.message.from_user.id
     if user_id not in ALLOWED_USERS:
         update.message.reply_text('Извините, но вы не авторизованы для использования этого бота.')
@@ -57,6 +73,15 @@ def check_user(update: Update, context: CallbackContext):
 
 # Создание callback функции для отслеживания прогресса загрузки
 def create_callback(encoder, update, context, message_id):
+    """
+    Создает callback функцию для отслеживания прогресса загрузки файла.
+
+    :param encoder: Объект MultipartEncoder, используемый для загрузки файла.
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    :param message_id: ID сообщения, которое будет обновляться с прогрессом загрузки.
+    :return: Callback функция для отслеживания прогресса загрузки.
+    """
     bar = tqdm(total=encoder.len, unit='B', unit_scale=True)
     last_update_time = 0
     upload_complete = False
@@ -78,6 +103,14 @@ def create_callback(encoder, update, context, message_id):
 
 # Загрузка файла на temp.sh
 def upload_to_tempsh(file_path, update: Update, context: CallbackContext):
+    """
+    Загружает файл на сервис temp.sh и возвращает URL для скачивания.
+
+    :param file_path: Путь к файлу, который нужно загрузить.
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    :return: URL для скачивания файла или None, если загрузка не удалась.
+    """
     try:
         logging.info(f"Начало загрузки файла {file_path}")
         with open(file_path, 'rb') as file:
@@ -104,6 +137,13 @@ def upload_to_tempsh(file_path, update: Update, context: CallbackContext):
 
 # Загрузка видео с помощью yt_dlp
 def download_video(update: Update, context: CallbackContext, video_link):
+    """
+    Загружает видео с помощью yt_dlp и сохраняет его во временный файл.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    :param video_link: Ссылка на видео, которое нужно загрузить.
+    """
     global message_id
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
@@ -123,6 +163,13 @@ def download_video(update: Update, context: CallbackContext, video_link):
 
 # Отслеживание прогресса загрузки
 def progress_hook(d, update: Update, context: CallbackContext):
+    """
+    Отслеживает прогресс загрузки видео и обновляет сообщение с прогрессом.
+
+    :param d: Словарь с информацией о прогрессе загрузки.
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     global last_update_time
     global message_id
     if d['status'] == 'downloading':
@@ -136,6 +183,12 @@ def progress_hook(d, update: Update, context: CallbackContext):
 
 # Начальное сообщение при взаимодействии с ботом
 def start(update: Update, context: CallbackContext):
+    """
+    Отправляет пользователю начальное сообщение с меню команд.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     user_id = update.effective_user.id
     if str(user_id) not in ALLOWED_USER_IDS:
         update.message.reply_text('Вы не авторизованы для выполнения этой команды.')
@@ -152,9 +205,17 @@ def start(update: Update, context: CallbackContext):
 
 # Отправка или загрузка видео
 def send_or_upload_video(file_path, update: Update, context: CallbackContext):
+    """
+    Отправляет видео пользователю напрямую, если его размер меньше 50MB, иначе загружает его на temp.sh и отправляет ссылку.
+
+    :param file_path: Путь к файлу видео.
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     file_size = os.path.getsize(file_path)
     if file_size <  50 * 1024 * 1024:  # 50MB
-        context.bot.send_video(chat_id=update.message.chat_id, video=open(file_path, 'rb'))
+        with open(file_path, 'rb') as video_file:
+            context.bot.send_video(chat_id=update.message.chat_id, video=video_file)
         logging.info(f"Video sent directly in chat {update.message.chat_id}")
     else:
         upload_url = upload_to_tempsh(file_path, update, context)
@@ -167,6 +228,12 @@ def send_or_upload_video(file_path, update: Update, context: CallbackContext):
 
 # Обрезка видео
 def cut(update: Update, context: CallbackContext):
+    """
+    Обрезает видео по заданным параметрам и отправляет результат пользователю.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     user_id = update.effective_user.id
     if str(user_id) not in ALLOWED_USER_IDS:
         update.message.reply_text('Вы не авторизованы для выполнения этой команды.')
@@ -188,13 +255,20 @@ def cut(update: Update, context: CallbackContext):
     subprocess.run(cut_command, shell=True)
 
     # Загрузка обрезанного видео
-    send_or_upload_video('temp_video.mp4', update, context)
+    send_or_upload_video('output_video.mp4', update, context)
 
     # Очистка временных файлов
     os.remove('output_video.mp4')
+    os.remove('temp_video.mp4')
 
 # Загрузка видео
 def download(update: Update, context: CallbackContext):
+    """
+    Загружает видео по ссылке и отправляет его пользователю.
+
+    :param update: Объект Update, содержащий информацию о сообщении.
+    :param context: Объект CallbackContext, содержащий контекст выполнения команды.
+    """
     user_id = update.effective_user.id
     if str(user_id) not in ALLOWED_USER_IDS:
         update.message.reply_text('Вы не авторизованы для выполнения этой команды.')
@@ -233,3 +307,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
