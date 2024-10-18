@@ -1,4 +1,5 @@
-python-telegram-bot==13.3
+python-telegram-bot==21.6
 yt_dlp
 tqdm
 requests_toolbelt
+psycopg2-binary

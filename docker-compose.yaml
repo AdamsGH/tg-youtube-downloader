@@ -4,7 +4,18 @@ services:
     image: youtube-downloader-telegram
     volumes:
       - .:/bot
-    environment:
-      - TOKEN
-      - ALLOWED_USER_IDS
+    env_file:
+      - .env
     restart: always
+
+  db:
+    image: postgres:latest
+    ports:
+      - 5650:5432
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
