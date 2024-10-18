@@ -39,6 +39,18 @@ def help(update: Update, context: CallbackContext):
     )
     update.message.reply_text(help_text)
 
+def convert_to_seconds(time_str):
+    """Конвертирует строку времени в секунды."""
+    parts = list(map(int, time_str.split(':')))
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    elif len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    elif len(parts) == 1:
+        return parts[0]
+    else:
+        raise ValueError("Invalid time format. Use HH:MM:SS, MM:SS, or SS.")
+
 # Функция для обработки нажатий на кнопки
 def button(update: Update, context: CallbackContext):
     """
@@ -243,15 +255,22 @@ def cut(update: Update, context: CallbackContext):
         update.message.reply_text('Недопустимое количество аргументов. Использование:\n/cut <video_link> <start_time> <duration>\nor /download <video_link>')
         return
 
-    video_link = args[0]
-    start_time = args[1]
-    duration = args[2]
+    video_link, start_time, duration = args
+
+    try:
+        start_time_seconds = convert_to_seconds(start_time)
+        duration_seconds = convert_to_seconds(duration) - start_time_seconds
+    except ValueError as e:
+        update.message.reply_text(f'Ошибка в формате времени: {str(e)}')
+        return
+    
+    logger.info(f"Запрос на обрезку видео: {video_link}, время начала: {start_time}, продолжительность: {duration_seconds}")
 
     update.message.reply_text('Начинаю загрузку...')
     download_video(update, context, video_link)
 
     # Обрезка видео
-    cut_command = f'ffmpeg -ss {start_time} -i temp_video.mp4 -t {duration} -c:v copy -c:a copy output_video.mp4'
+    cut_command = f'ffmpeg -ss {start_time_seconds} -i temp_video.mp4 -t {duration_seconds} -c:v copy -c:a copy output_video.mp4'
     subprocess.run(cut_command, shell=True)
 
     # Загрузка обрезанного видео
