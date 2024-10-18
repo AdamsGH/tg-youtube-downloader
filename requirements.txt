@@ -3,3 +3,4 @@ yt_dlp
 tqdm
 requests_toolbelt
 psycopg2-binary
+aiohttp
