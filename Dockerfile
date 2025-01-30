@@ -15,8 +15,12 @@ WORKDIR /bot
 COPY requirements.txt /bot/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the current directory contents into the container at /bot
-COPY . /bot/
+# Copy project files
+COPY src/ /bot/src/
+COPY main.py /bot/
+
+# Create directory for temporary files and set permissions
+RUN mkdir -p /bot/temp && chmod 777 /bot/temp
 
 # Run the command to start your bot
 CMD ["python", "main.py"]
