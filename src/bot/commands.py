@@ -74,13 +74,32 @@ def cut(update: Update, context: CallbackContext):
             )
             return
 
-        video_link, start_time, duration = args
+        video_link, start_time, end_time = args
 
+        # Проверяем формат времени и логику временных отрезков
         try:
-            start_time_seconds = convert_to_seconds(start_time)
-            duration_seconds = convert_to_seconds(duration)
+            start_seconds = convert_to_seconds(start_time)
+            end_seconds = convert_to_seconds(end_time)
+            
+            if start_seconds < 0:
+                raise ValueError("Время начала не может быть отрицательным")
+            if end_seconds <= start_seconds:
+                raise ValueError("Конечное время должно быть больше начального")
+            
+            duration_seconds = end_seconds - start_seconds
+            duration = f"{duration_seconds//3600:02d}:{(duration_seconds%3600)//60:02d}:{duration_seconds%60:02d}"
+                
+            # Добавляем понятное сообщение для пользователя
+            update.message.reply_text(
+                f"Будет вырезан фрагмент с {start_time} по {end_time} "
+                f"(длительность: {duration})"
+            )
         except ValueError as e:
-            update.message.reply_text(f'Ошибка в формате времени: {str(e)}')
+            update.message.reply_text(
+                f'Ошибка в формате времени: {str(e)}\n'
+                'Используйте формат ЧЧ:ММ:СС для указания времени.\n'
+                'Пример: /cut <ссылка> 00:04:00 00:08:00 - вырежет фрагмент с 4-й по 8-ю минуту'
+            )
             return
 
         logger.info(
@@ -88,21 +107,13 @@ def cut(update: Update, context: CallbackContext):
             f"время начала: {start_time}, продолжительность: {duration}"
         )
 
-        if not download_video(update, context, video_link):
+        # Загружаем и обрезаем видео одним действием
+        if not download_video(update, context, video_link, start_time, duration_seconds):
             return
 
-        # Обрезка видео
-        input_path = os.path.join("temp", "temp_video.mp4")
-        output_path = os.path.join("temp", "output_video.mp4")
-        
-        cut_command = (
-            f'ffmpeg -ss {start_time_seconds} -i {input_path} '
-            f'-t {duration_seconds} -c:v copy -c:a copy {output_path}'
-        )
-        subprocess.run(cut_command, shell=True)
-
-        # Отправка обрезанного видео
-        send_or_upload_video(output_path, update, context)
+        # Отправляем видео
+        temp_video_path = os.path.join("temp", "temp_video.mp4")
+        send_or_upload_video(temp_video_path, update, context)
 
     except Exception as e:
         logger.error(f"Ошибка при обрезке видео: {str(e)}")
@@ -125,7 +136,7 @@ def download(update: Update, context: CallbackContext):
             return
 
         video_link = args[0]
-        if download_video(update, context, video_link):
+        if download_video(update, context, video_link, None, None):
             temp_video_path = os.path.join("temp", "temp_video.mp4")
             send_or_upload_video(temp_video_path, update, context)
 

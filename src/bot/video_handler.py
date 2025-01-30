@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import yt_dlp
+from yt_dlp.utils import download_range_func
 import requests
 from telegram import Update
 from telegram.ext import CallbackContext
@@ -74,24 +75,74 @@ def upload_to_tempsh(file_path, update: Update, context: CallbackContext):
         logger.error(f"Не удалось загрузить {file_path}, ошибка: {str(e)}")
         return None
 
-def download_video(update: Update, context: CallbackContext, video_link: str) -> bool:
+def download_video(update: Update, context: CallbackContext, video_link: str, start_time: str = None, duration_seconds: int = None) -> bool:
     """
     Загружает видео с помощью yt_dlp и сохраняет его во временный файл.
+    При указании start_time и duration_seconds загружает только указанный фрагмент.
     Возвращает True в случае успеха, False в случае ошибки.
+    
+    :param video_link: URL видео
+    :param start_time: Время начала фрагмента в формате HH:MM:SS (опционально)
+    :param duration_seconds: Длительность фрагмента в секундах (опционально)
     """
     try:
         message = update.message.reply_text('Загрузка началась...')
         message_id = message.message_id
 
         temp_video_path = os.path.join(TEMP_DIR, 'temp_video.mp4')
+        
+        # Инициализация переменных
+        start_seconds = None
+
+        # Если указаны параметры времени
+        if start_time is not None and duration_seconds is not None:
+            try:
+                # Вычисляем время начала
+                start_parts = [int(x) for x in start_time.split(':')]
+                start_seconds = start_parts[0] * 3600 + start_parts[1] * 60 + start_parts[2]
+
+                # Проверка на отрицательные значения
+                if start_seconds < 0:
+                    raise ValueError("Время начала не может быть отрицательным")
+                if duration_seconds <= 0:
+                    raise ValueError("Длительность должна быть положительной")
+
+                logger.info(f"Вычисленное время: start_seconds={start_seconds}, duration_seconds={duration_seconds}")
+            except Exception as e:
+                logger.error(f"Ошибка при обработке времени: {str(e)}")
+                update.message.reply_text("Ошибка в формате времени. Используйте формат ЧЧ:ММ:СС")
+                return False
+        else:
+            start_seconds = None
+            duration_seconds = None
+
+        # Базовые параметры
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': temp_video_path,
-            'nooverwrites': False,
+            'force_keyframes_at_cuts': True,
             'progress_hooks': [
                 lambda d: progress_hook(d, update, context, message_id)
-            ]
+            ],
+            'force_generic_extractor': False,
+            'fragment_retries': 10,
+            'ignoreerrors': False,
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls']
+                }
+            },
+            'postprocessor_args': ['-avoid_negative_ts', 'make_zero']
         }
+
+        # Добавляем параметры обрезки только если указаны временные параметры
+        if start_seconds is not None and duration_seconds is not None:
+            ydl_opts['download_ranges'] = download_range_func([], [[start_seconds, start_seconds + duration_seconds]])
+
+        logger.info(f"Загрузка видео {video_link}")
+        if start_time is not None and duration_seconds is not None:
+            logger.info(f"Параметры обрезки: start={start_time}, duration={duration_seconds} seconds")
+        logger.info(f"Параметры yt-dlp: {ydl_opts}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_link])
