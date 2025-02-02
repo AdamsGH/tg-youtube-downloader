@@ -1,13 +1,13 @@
 import logging
 import os
 import time
+import asyncio
 import yt_dlp
 from yt_dlp.utils import download_range_func
-import requests
+import aiohttp
 from telegram import Update
-from telegram.ext import CallbackContext
-from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
-from .utils import create_callback, progress_hook
+from telegram.ext import ContextTypes
+from .utils import progress_hook
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,9 +15,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# Создание сессии requests
-session = requests.Session()
 
 # Путь к директории для временных файлов
 TEMP_DIR = "temp"
@@ -40,53 +37,54 @@ def cleanup_temp_files(pattern="temp_video*"):
     except Exception as e:
         logger.error(f"Ошибка при очистке временных файлов: {str(e)}")
 
-def upload_to_tempsh(file_path, update: Update, context: CallbackContext):
+async def upload_to_tempsh(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Загружает файл на сервис temp.sh и возвращает URL для скачивания.
     """
     try:
         logger.info(f"Начало загрузки файла {file_path}")
-        with open(file_path, 'rb') as file:
-            encoder = MultipartEncoder(fields={'file': ('video.mp4', file)})
-            message = update.message.reply_text('Загрузка началась...')
-            message_id = message.message_id
-            monitor = MultipartEncoderMonitor(
-                encoder,
-                create_callback(encoder, update, context, message_id)
-            )
+        message = await update.message.reply_text('Загрузка началась...')
+        message_id = message.message_id
 
-            for i in range(3):  # Попытка загрузки 3 раза
-                response = session.post(
-                    'https://temp.sh/upload',
-                    data=monitor,
-                    headers={'Content-Type': monitor.content_type}
-                )
-                if response.status_code == 200:
-                    upload_url = response.text
-                    logger.info(f"Загрузка успешна, URL: {upload_url}")
-                    return upload_url
-                elif response.status_code == 502 and i < 2:
-                    logger.warning(f"Не удалось загрузить {file_path}, код ответа: {response.status_code}. Повторная попытка...")
-                    time.sleep(5)
-                else:
-                    logger.error(f"Не удалось загрузить {file_path}, код ответа: {response.status_code}")
-                    return None
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, 'rb') as file:
+                data = aiohttp.FormData()
+                data.add_field('file', file, filename='video.mp4')
+
+                last_update_time = time.time()
+
+                for i in range(3):  # Попытка загрузки 3 раза
+                    try:
+                        async with session.post('https://temp.sh/upload', data=data) as response:
+                            if response.status == 200:
+                                upload_url = await response.text()
+                                logger.info(f"Загрузка успешна, URL: {upload_url}")
+                                return upload_url
+                            elif response.status == 502 and i < 2:
+                                logger.warning(f"Не удалось загрузить {file_path}, код ответа: {response.status}. Повторная попытка...")
+                                await asyncio.sleep(5)
+                            else:
+                                logger.error(f"Не удалось загрузить {file_path}, код ответа: {response.status}")
+                                return None
+                    except Exception as e:
+                        if i < 2:
+                            logger.warning(f"Ошибка при загрузке: {str(e)}. Повторная попытка...")
+                            await asyncio.sleep(5)
+                        else:
+                            raise
+
     except Exception as e:
         logger.error(f"Не удалось загрузить {file_path}, ошибка: {str(e)}")
         return None
 
-def download_video(update: Update, context: CallbackContext, video_link: str, start_time: str = None, duration_seconds: int = None) -> bool:
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, video_link: str, start_time: str = None, duration_seconds: int = None) -> bool:
     """
     Загружает видео с помощью yt_dlp и сохраняет его во временный файл.
     При указании start_time и duration_seconds загружает только указанный фрагмент.
     Возвращает True в случае успеха, False в случае ошибки.
-    
-    :param video_link: URL видео
-    :param start_time: Время начала фрагмента в формате HH:MM:SS (опционально)
-    :param duration_seconds: Длительность фрагмента в секундах (опционально)
     """
     try:
-        message = update.message.reply_text('Загрузка началась...')
+        message = await update.message.reply_text('Загрузка началась...')
         message_id = message.message_id
 
         temp_video_path = os.path.join(TEMP_DIR, 'temp_video.mp4')
@@ -110,11 +108,8 @@ def download_video(update: Update, context: CallbackContext, video_link: str, st
                 logger.info(f"Вычисленное время: start_seconds={start_seconds}, duration_seconds={duration_seconds}")
             except Exception as e:
                 logger.error(f"Ошибка при обработке времени: {str(e)}")
-                update.message.reply_text("Ошибка в формате времени. Используйте формат ЧЧ:ММ:СС")
+                await update.message.reply_text("Ошибка в формате времени. Используйте формат ЧЧ:ММ:СС")
                 return False
-        else:
-            start_seconds = None
-            duration_seconds = None
 
         # Базовые параметры
         ydl_opts = {
@@ -147,7 +142,7 @@ def download_video(update: Update, context: CallbackContext, video_link: str, st
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_link])
 
-        context.bot.edit_message_text(
+        await context.bot.edit_message_text(
             chat_id=update.message.chat_id,
             message_id=message_id,
             text='Загрузка завершена.'
@@ -155,10 +150,10 @@ def download_video(update: Update, context: CallbackContext, video_link: str, st
         return True
     except Exception as e:
         logger.error(f"Ошибка при загрузке видео: {str(e)}")
-        update.message.reply_text(f"Произошла ошибка при загрузке видео: {str(e)}")
+        await update.message.reply_text(f"Произошла ошибка при загрузке видео: {str(e)}")
         return False
 
-def send_or_upload_video(file_path: str, update: Update, context: CallbackContext):
+async def send_or_upload_video(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Отправляет видео пользователю напрямую или через temp.sh в зависимости от размера.
     """
@@ -166,27 +161,27 @@ def send_or_upload_video(file_path: str, update: Update, context: CallbackContex
         file_size = os.path.getsize(file_path)
         if file_size < 50 * 1024 * 1024:  # 50MB
             with open(file_path, 'rb') as video_file:
-                context.bot.send_video(
+                await context.bot.send_video(
                     chat_id=update.message.chat_id,
                     video=video_file
                 )
             logger.info(f"Видео отправлено напрямую в чат {update.message.chat_id}")
         else:
-            upload_url = upload_to_tempsh(file_path, update, context)
+            upload_url = await upload_to_tempsh(file_path, update, context)
             if upload_url:
-                context.bot.send_message(
+                await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text=f"Файл слишком большой для Telegram. Скачайте по ссылке: {upload_url}"
                 )
                 logger.info(f"Видео загружено на temp.sh для чата {update.message.chat_id}")
             else:
-                context.bot.send_message(
+                await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text="Не удалось загрузить файл."
                 )
                 logger.error(f"Ошибка загрузки видео для чата {update.message.chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке видео: {str(e)}")
-        update.message.reply_text(f"Произошла ошибка при отправке видео: {str(e)}")
+        await update.message.reply_text(f"Произошла ошибка при отправке видео: {str(e)}")
     finally:
         cleanup_temp_files()

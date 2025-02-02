@@ -1,4 +1,6 @@
-python-telegram-bot==13.3
+python-telegram-bot[job-queue]
 yt_dlp
 tqdm
 requests_toolbelt
+aiohttp
+APScheduler>=3.6.3

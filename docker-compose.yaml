@@ -4,7 +4,7 @@ services:
     image: youtube-downloader-telegram
     container_name: youtube-downloader
     volumes:
-      - .:/bot
+      - ./src:/bot/src
     environment:
       - TOKEN
       - ALLOWED_USER_IDS
