@@ -1,8 +1,8 @@
-# Токен вашего Telegram бота, полученный от @BotFather
-# Пример: TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+# Telegram bot token received from @BotFather
+# Example: TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 TOKEN=
 
-# Список разрешенных ID пользователей Telegram, разделенных запятыми
-# Чтобы узнать свой ID, отправьте сообщение боту @userinfobot
-# Пример: ALLOWED_USER_IDS=123456789,987654321
+# List of allowed Telegram user IDs, separated by commas
+# To find out your ID, send a message to @userinfobot
+# Example: ALLOWED_USER_IDS=123456789,987654321
 ALLOWED_USER_IDS=

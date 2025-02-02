@@ -1,86 +1,29 @@
 # YT Cut Bot
 
-## Описание
+## Description
 
-YT Cut Bot - это Telegram бот, который позволяет загружать видео с YouTube, обрезать их и отправлять обратно в Telegram или загружать на transfer.sh, если размер файла превышает 200 МБ.
+YT Cut Bot is a Telegram bot that allows you to download videos from YouTube, trim them, and then either send them back on Telegram or upload them to temp.sh if the file size exceeds 200 MB.
 
-## Зависимости
+## Dependencies
 
-Данный бот использует следующие библиотеки:
+This bot uses the following libraries:
 
-- `logging` для логирования
-- `time` для работы со временем
-- `yt_dlp` для загрузки видео с YouTube
-- `subprocess` для запуска shell команд
-- `os` для работы с файловой системой
-- `requests` для отправки HTTP запросов
-- `telegram` для взаимодействия с Telegram API
-- `re` для работы с регулярными выражениями
-- `tqdm` для отображения прогресса загрузки
-- `requests_toolbelt` для работы с multipart формами
+- `logging` for logging
+- `time` for time-related operations
+- `yt_dlp` for downloading videos from YouTube
+- `subprocess` for executing shell commands
+- `os` for file system operations
+- `requests` for sending HTTP requests
+- `telegram` for interacting with the Telegram API
+- `re` for working with regular expressions
+- `tqdm` for displaying download progress
+- `requests_toolbelt` for handling multipart forms
 
-## Установка
+## Installation
 
-1. Клонируйте этот репозиторий
+1. Clone this repository
 ```bash
 git clone https://github.com/AdamsGH/tg-youtube-downloader
 ```
-
-2. Перейдите в директорию проекта
-```bash
-cd tg-youtube-downloader
-```
-
-3. Создайте и заполните файл .env с вашими переменными окружения (TOKEN и ALLOWED_USER_IDS)
-
-## Использование
-
-### Сборка Docker образа
-
-```bash
-make build
-```
-
-### Запуск бота
-
-```bash
-make run
-```
-
-### Остановка бота
-
-```bash
-make stop
-```
-
-### Удаление Docker образа
-
-```bash
-make rm
-```
-
-### Пересборка Docker образа
-
-```bash
-make rebuild
-```
-
-## Использование
-
-Для использования бота необходимо заменить `TOKEN` на токен вашего бота в `.env` файле, там же указать `ALLOWED_USER_IDS` с списком пользователей которые смогут использовать бота, разделив его запятыми.
-
-### Команды
-
-Бот поддерживает следующие команды:
-
-- `/start` - начинает взаимодействие с ботом
-- `/cut <video_link> <start_time> <duration>` - загружает видео по ссылке `video_link`, обрезает его, начиная с `start_time` на протяжении `duration` и отправляет обратно в Telegram или загружает на transfer.sh
-- `/download <video_link>` - загружает видео по ссылке `video_link` и отправляет его обратно в Telegram или загружает на transfer.sh
-
-## Работа с файлами
-
-Все загружаемые и обрезанные видео временно сохраняются на диск в виде `temp_video.mp4` и `output_video.mp4` соответственно. После отправки они удаляются.
-
-## Загрузка на transfer.sh
-
-Если размер файла превышает 200 МБ, он загружается на transfer.sh. После загрузки в чат отправляется ссылка на загруженный файл и токен для его удаления.
+2. Provide .env vars 
+3. Run docker compose
