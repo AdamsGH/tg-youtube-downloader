@@ -1,4 +1,6 @@
-from typing import Final
+"""Constants configuration module."""
+from typing import Final, Dict, Any
+from pathlib import Path
 
 # Command messages
 UNAUTHORIZED_MESSAGE: Final = 'Unauthorized.'
@@ -22,3 +24,18 @@ DOWNLOAD_ERROR: Final = "Download error: {}"
 
 # Progress messages
 CUTTING_VIDEO: Final = "Cutting video from {} to {} (Duration: {})"
+
+# File handling
+TEMP_DIR: Final[Path] = Path("temp")
+MAX_DIRECT_UPLOAD_SIZE: Final = 50 * 1024 * 1024  # 50MB
+
+# Upload configuration
+UPLOAD_CONFIG: Final[Dict[str, Any]] = {
+    'max_retries': 3,
+    'retry_delay': 5,  # seconds
+    'upload_url': 'https://temp.sh/upload'
+}
+
+# Progress update configuration
+PROGRESS_UPDATE_INTERVAL: Final = 5.0  # seconds
+PROGRESS_QUEUE_SIZE: Final = 100
