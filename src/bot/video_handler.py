@@ -28,10 +28,6 @@ class VideoProcessingError(Exception):
     """Base video processing error."""
     pass
 
-class DownloadError(VideoProcessingError):
-    """Video download error."""
-    pass
-
 class UploadError(VideoProcessingError):
     """Video upload error."""
     pass
@@ -72,7 +68,7 @@ class VideoProcessor:
         update: Update
     ) -> str:
         """Upload file to temp.sh and return download URL."""
-        message = await update.message.reply_text('Upload started...')
+        await update.message.reply_text('Upload started...')
         
         async with aiohttp.ClientSession() as session:
             with open(file_path, 'rb') as file:
@@ -122,8 +118,8 @@ class VideoProcessor:
             VideoProcessingResult with download status and details
         """
         cls.ensure_temp_dir()
-        message = await update.message.reply_text('Download started...')
-        message_id = message.message_id
+        status_message = await update.message.reply_text('Download started...')
+        message_id = status_message.message_id
 
         try:
             temp_filename = cls.generate_temp_filename(update.effective_user.id)

@@ -20,10 +20,6 @@ from .video_handler import VideoProcessor
 
 logger = configure_logger(__name__)
 
-class AuthError(Exception):
-    """Authentication error."""
-    pass
-
 class CommandHandler:
     """Command processing utilities."""
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from queue import Queue
 
 from telegram import Update
-from telegram.ext import ContextTypes, Application
+from telegram.ext import Application
 from tqdm import tqdm
 
 from config.logging import configure_logger
