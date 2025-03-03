@@ -1,6 +1,6 @@
 """Logging setup and filters."""
 import logging
-from typing import Optional, Type
+from typing import Optional
 from dataclasses import dataclass
 from logging import Logger, Filter
 

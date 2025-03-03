@@ -2,9 +2,6 @@
 """Telegram bot application."""
 import os
 import signal
-import asyncio
-from contextlib import asynccontextmanager
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 

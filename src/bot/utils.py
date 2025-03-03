@@ -1,8 +1,7 @@
 """Progress tracking and time conversion utilities."""
-import logging
 import time
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 from dataclasses import dataclass
 from queue import Queue
 

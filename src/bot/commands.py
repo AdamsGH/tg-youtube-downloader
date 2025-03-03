@@ -1,10 +1,13 @@
 """Bot command handlers."""
-from typing import List, Optional
+from typing import List
 import os
 import asyncio
-from dataclasses import dataclass
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update, 
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup
+)
 from telegram.ext import ContextTypes
 
 from config.logging import configure_logger
@@ -13,16 +16,9 @@ from config.constants import (
     SELECT_COMMAND, TIME_ERROR, CUT_ERROR, DOWNLOAD_ERROR, CUTTING_VIDEO
 )
 from .utils import convert_to_seconds
-from .video_handler import VideoProcessor, VideoProcessingError
+from .video_handler import VideoProcessor
 
 logger = configure_logger(__name__)
-
-@dataclass
-class CommandResult:
-    """Command execution result."""
-    success: bool
-    message: str = ""
-    error: Optional[Exception] = None
 
 class AuthError(Exception):
     """Authentication error."""
