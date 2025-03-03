@@ -4,15 +4,16 @@ import yt_dlp
 import aiohttp
 from typing import Optional
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .utils import progress_hook, convert_to_seconds
+from .utils import progress_hook, convert_to_seconds, progress_manager
 from .logger_config import setup_logger
 from .video_config import (
-    get_ydl_opts, TEMP_DIR, TEMP_VIDEO_FILENAME,
-    MAX_DIRECT_UPLOAD_SIZE, UPLOAD_CONFIG
+    get_ydl_opts, TEMP_DIR, MAX_DIRECT_UPLOAD_SIZE, 
+    UPLOAD_CONFIG
 )
 
 logger = setup_logger(__name__)
@@ -33,25 +34,24 @@ def ensure_temp_dir():
     """Ensure temporary directory exists."""
     Path(TEMP_DIR).mkdir(exist_ok=True)
 
-def get_temp_path(filename: str = TEMP_VIDEO_FILENAME) -> str:
+def generate_temp_filename(user_id: int) -> str:
+    """Generate unique temporary filename based on user ID and timestamp."""
+    timestamp = int(asyncio.get_event_loop().time() * 1000)
+    return f"temp_video_{user_id}_{timestamp}.mp4"
+
+def get_temp_path(filename: str) -> str:
     """Get full path for temporary file."""
     return str(Path(TEMP_DIR) / filename)
 
-def cleanup_temp_files(pattern: str = "temp_video*") -> None:
-    """Clean temporary files matching the pattern."""
+def cleanup_temp_file(filepath: str) -> None:
+    """Clean specific temporary file."""
     try:
-        temp_dir = Path(TEMP_DIR)
-        if not temp_dir.exists():
-            return
-            
-        for file in temp_dir.glob(pattern):
-            try:
-                file.unlink()
-                logger.info(f"Removed temp file: {file}")
-            except Exception as e:
-                logger.error(f"Error deleting {file}: {e}")
+        file = Path(filepath)
+        if file.exists():
+            file.unlink()
+            logger.info(f"Removed temp file: {file}")
     except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
+        logger.error(f"Error deleting {filepath}: {e}")
 
 async def upload_to_tempsh(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """Upload file to temp.sh and return the download URL."""
@@ -89,14 +89,15 @@ async def download_video(
     video_link: str,
     start_time: Optional[str] = None,
     duration_seconds: Optional[int] = None
-) -> bool:
+) -> tuple[bool, str]:
     """Download video using yt-dlp with optional time range."""
     ensure_temp_dir()
     message = await update.message.reply_text('Download started...')
     message_id = message.message_id
 
     try:
-        temp_video_path = get_temp_path()
+        temp_filename = generate_temp_filename(update.effective_user.id)
+        temp_video_path = get_temp_path(temp_filename)
         start_seconds = None
 
         if start_time and duration_seconds:
@@ -118,17 +119,24 @@ async def download_video(
         )
 
         logger.info(f"Downloading: {video_link}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_link])
+        
+        # Запускаем yt-dlp в отдельном потоке
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,  # использовать ThreadPoolExecutor по умолчанию
+            lambda: yt_dlp.YoutubeDL(ydl_opts).download([video_link])
+        )
 
         await context.bot.edit_message_text(
             chat_id=update.message.chat_id,
             message_id=message_id,
             text='Download complete.'
         )
-        return True
+        progress_manager.remove_queue(update.message.chat_id, message_id)
+        return True, temp_video_path
 
     except Exception as e:
+        progress_manager.remove_queue(update.message.chat_id, message_id)
         raise DownloadError(f"Download failed: {e}")
 
 async def send_or_upload_video(
@@ -141,6 +149,7 @@ async def send_or_upload_video(
         file_size = os.path.getsize(file_path)
         
         if file_size < MAX_DIRECT_UPLOAD_SIZE:
+            # Отправляем видео напрямую
             with open(file_path, 'rb') as video_file:
                 await context.bot.send_video(
                     chat_id=update.message.chat_id,
@@ -148,7 +157,11 @@ async def send_or_upload_video(
                 )
             logger.info(f"Video sent directly to chat {update.message.chat_id}")
         else:
-            upload_url = await upload_to_tempsh(file_path, update, context)
+            # Загружаем на temp.sh в отдельном потоке
+            loop = asyncio.get_event_loop()
+            upload_task = asyncio.create_task(upload_to_tempsh(file_path, update, context))
+            upload_url = await upload_task
+            
             if upload_url:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
@@ -161,4 +174,4 @@ async def send_or_upload_video(
     except Exception as e:
         raise VideoProcessingError(f"Failed to send video: {e}")
     finally:
-        cleanup_temp_files()
+        cleanup_temp_file(file_path)

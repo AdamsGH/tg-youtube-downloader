@@ -35,7 +35,6 @@ def get_ydl_opts(
 
 # Constants for file handling
 TEMP_DIR = "temp"
-TEMP_VIDEO_FILENAME = "temp_video.mp4"
 MAX_DIRECT_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
 # Upload configuration

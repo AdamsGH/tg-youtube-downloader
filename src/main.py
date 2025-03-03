@@ -13,36 +13,12 @@ from bot.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 
-class ProgressState:
-    """Class to manage progress job state."""
-    def __init__(self):
-        self.running = False
-
-    @asynccontextmanager
-    async def lock(self):
-        """Context manager for progress job execution."""
-        if self.running:
-            logger.debug("Skipping progress job; previous task in progress")
-            yield False
-            return
-        self.running = True
-        try:
-            yield True
-        finally:
-            self.running = False
-
-# Create global state manager
-progress_state = ProgressState()
-
 async def progress_job(context):
     """Handle progress updates."""
-    async with progress_state.lock() as acquired:
-        if not acquired:
-            return
-        try:
-            await process_progress_updates(context.application)
-        except Exception as e:
-            context.application.logger.error(f"Progress update error: {e}")
+    try:
+        await process_progress_updates(context.application)
+    except Exception as e:
+        context.application.logger.error(f"Progress update error: {e}")
 
 def shutdown_signal(signum, frame):
     """Handle shutdown signals."""

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 from typing import List, Optional
 import os
+import asyncio
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from .utils import convert_to_seconds
-from .video_handler import download_video, send_or_upload_video, cleanup_temp_files
+from .video_handler import download_video, send_or_upload_video, cleanup_temp_file
 from .logger_config import setup_logger
 from .constants import (
     UNAUTHORIZED_MESSAGE, HELP_TEXT, CUT_USAGE, DOWNLOAD_USAGE,
@@ -113,14 +114,22 @@ async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         logger.info(f"Cut: {video_link}, start: {start_time}, duration: {duration_seconds}s")
         
-        if await download_video(update, context, video_link, start_time, duration_seconds):
-            temp_video_path = os.path.join("temp", "temp_video.mp4")
-            await send_or_upload_video(temp_video_path, update, context)
+        # Создаем и запускаем задачу загрузки
+        async def download_task():
+            try:
+                success, temp_video_path = await download_video(update, context, video_link, start_time, duration_seconds)
+                if success:
+                    await send_or_upload_video(temp_video_path, update, context)
+            except Exception as e:
+                await send_error_message(update, CUT_ERROR.format(str(e)))
+            finally:
+                if 'temp_video_path' in locals():
+                    cleanup_temp_file(temp_video_path)
+
+        asyncio.create_task(download_task())
 
     except Exception as e:
         await send_error_message(update, CUT_ERROR.format(str(e)))
-    finally:
-        cleanup_temp_files()
 
 async def download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process video download."""
@@ -133,11 +142,20 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         video_link = context.args[0]
-        if await download_video(update, context, video_link):
-            temp_video_path = os.path.join("temp", "temp_video.mp4")
-            await send_or_upload_video(temp_video_path, update, context)
+        
+        # Создаем и запускаем задачу загрузки
+        async def download_task():
+            try:
+                success, temp_video_path = await download_video(update, context, video_link)
+                if success:
+                    await send_or_upload_video(temp_video_path, update, context)
+            except Exception as e:
+                await send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
+            finally:
+                if 'temp_video_path' in locals():
+                    cleanup_temp_file(temp_video_path)
+
+        asyncio.create_task(download_task())
 
     except Exception as e:
         await send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
-    finally:
-        cleanup_temp_files()

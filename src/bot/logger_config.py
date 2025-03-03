@@ -13,13 +13,16 @@ def setup_logger(name: Optional[str] = None) -> logging.Logger:
         
         # Suppress extra logs from third-party modules
         logging.getLogger("httpx").setLevel(logging.ERROR)
-        aps_logger = logging.getLogger("apscheduler.scheduler")
-        aps_logger.setLevel(logging.ERROR)
         
-        class SuppressMaxInstancesFilter(logging.Filter):
-            def filter(self, record):
-                return "maximum number of running instances reached" not in record.getMessage()
-                
-        aps_logger.addFilter(SuppressMaxInstancesFilter())
+        # Suppress all apscheduler logs
+        for logger_name in ["apscheduler.scheduler", "apscheduler.executors.default"]:
+            aps_logger = logging.getLogger(logger_name)
+            aps_logger.setLevel(logging.ERROR)
+            
+            class SuppressMaxInstancesFilter(logging.Filter):
+                def filter(self, record):
+                    return "maximum number of running instances reached" not in record.getMessage()
+                    
+            aps_logger.addFilter(SuppressMaxInstancesFilter())
     
     return logger
