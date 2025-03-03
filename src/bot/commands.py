@@ -1,114 +1,143 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from typing import List, Optional
 import os
-import logging
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from .utils import convert_to_seconds
 from .video_handler import download_video, send_or_upload_video, cleanup_temp_files
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from .logger_config import setup_logger
+from .constants import (
+    UNAUTHORIZED_MESSAGE, HELP_TEXT, CUT_USAGE, DOWNLOAD_USAGE,
+    SELECT_COMMAND, TIME_ERROR, CUT_ERROR, DOWNLOAD_ERROR, CUTTING_VIDEO
 )
-logger = logging.getLogger(__name__)
 
-ALLOWED_USER_IDS = os.getenv('ALLOWED_USER_IDS', '').split(',')
+logger = setup_logger(__name__)
+
+class AuthError(Exception):
+    """Raised when user authentication fails."""
+    pass
+
+def get_allowed_users() -> List[str]:
+    """Get list of allowed user IDs from environment."""
+    return os.getenv('ALLOWED_USER_IDS', '').split(',')
 
 async def check_auth(update: Update) -> bool:
     """Check user authentication."""
     user_id = str(update.effective_user.id)
-    if user_id not in ALLOWED_USER_IDS:
-        await update.effective_message.reply_text('Unauthorized.')
+    if user_id not in get_allowed_users():
+        await update.effective_message.reply_text(UNAUTHORIZED_MESSAGE)
         return False
     return True
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_error_message(update: Update, error: Exception) -> None:
+    """Send error message to user."""
+    error_message = str(error)
+    logger.error(error_message)
+    await update.effective_message.reply_text(error_message)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send help message."""
     if not await check_auth(update):
         return
-    help_text = (
-        "Commands:\n"
-        "/start - Start bot\n"
-        "/cut <video_link> <start_time> <end_time> - Cut video (time format: HH:MM:SS, MM:SS, or SS)\n"
-        "/download <video_link> - Download video\n"
-        "/help - Show this message"
-    )
-    await update.effective_message.reply_text(help_text)
+    await update.effective_message.reply_text(HELP_TEXT)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button clicks."""
     query = update.callback_query
     await query.answer()
-    if query.data == 'cut':
-        await query.edit_message_text(text="Usage: /cut <video_link> <start_time> <end_time>")
-    elif query.data == 'download':
-        await query.edit_message_text(text="Usage: /download <video_link>")
+    
+    usage_messages = {
+        'cut': CUT_USAGE,
+        'download': DOWNLOAD_USAGE
+    }
+    
+    if query.data in usage_messages:
+        await query.edit_message_text(text=usage_messages[query.data])
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send start menu."""
     if not await check_auth(update):
         return
+        
     keyboard = [
-        [InlineKeyboardButton("Cut Video", callback_data='cut'),
-         InlineKeyboardButton("Download Video", callback_data='download')]
+        [
+            InlineKeyboardButton("Cut Video", callback_data='cut'),
+            InlineKeyboardButton("Download Video", callback_data='download')
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.effective_message.reply_text('Select command:', reply_markup=reply_markup)
+    await update.effective_message.reply_text(SELECT_COMMAND, reply_markup=reply_markup)
 
-async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process video cutting."""
-    if not await check_auth(update):
-        return
+def format_duration(seconds: int) -> str:
+    """Format duration in seconds to HH:MM:SS."""
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+async def validate_cut_params(start_time: str, end_time: str) -> tuple[int, int]:
+    """Validate and convert cut parameters."""
     try:
-        args = context.args
-        if len(args) != 3:
-            await update.effective_message.reply_text('Usage: /cut <video_link> <start_time> <end_time>')
+        start_seconds = convert_to_seconds(start_time)
+        end_seconds = convert_to_seconds(end_time)
+        
+        if start_seconds < 0:
+            raise ValueError("Start time cannot be negative")
+        if end_seconds <= start_seconds:
+            raise ValueError("End time must be greater than start time")
+            
+        duration_seconds = end_seconds - start_seconds
+        return start_seconds, duration_seconds
+    except ValueError as e:
+        raise ValueError(TIME_ERROR.format(str(e)))
+
+async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Process video cutting."""
+    try:
+        if not await check_auth(update):
             return
-        video_link, start_time, end_time = args
-        try:
-            start_seconds = convert_to_seconds(start_time)
-            end_seconds = convert_to_seconds(end_time)
-            if start_seconds < 0:
-                raise ValueError("Negative start time")
-            if end_seconds <= start_seconds:
-                raise ValueError("End time must exceed start")
-            duration_seconds = end_seconds - start_seconds
-            duration_formatted = f"{duration_seconds // 3600:02d}:{(duration_seconds % 3600) // 60:02d}:{duration_seconds % 60:02d}"
-            await update.effective_message.reply_text(
-                f"Cutting video from {start_time} to {end_time} (Duration: {duration_formatted})"
-            )
-        except ValueError as e:
-            await update.effective_message.reply_text(f"Time error: {e}. Use HH:MM:SS, MM:SS, or SS format.")
+
+        if not context.args or len(context.args) != 3:
+            await update.effective_message.reply_text(CUT_USAGE)
             return
+
+        video_link, start_time, end_time = context.args
+        start_seconds, duration_seconds = await validate_cut_params(start_time, end_time)
+        
+        duration_formatted = format_duration(duration_seconds)
+        await update.effective_message.reply_text(
+            CUTTING_VIDEO.format(start_time, end_time, duration_formatted)
+        )
+
         logger.info(f"Cut: {video_link}, start: {start_time}, duration: {duration_seconds}s")
-        if not await download_video(update, context, video_link, start_time, duration_seconds):
-            return
-        temp_video_path = os.path.join("temp", "temp_video.mp4")
-        await send_or_upload_video(temp_video_path, update, context)
+        
+        if await download_video(update, context, video_link, start_time, duration_seconds):
+            temp_video_path = os.path.join("temp", "temp_video.mp4")
+            await send_or_upload_video(temp_video_path, update, context)
+
     except Exception as e:
-        logger.error(f"Cut error: {e}")
-        await update.effective_message.reply_text(f"Cut error: {e}")
+        await send_error_message(update, CUT_ERROR.format(str(e)))
     finally:
         cleanup_temp_files()
 
-async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process video download."""
-    if not await check_auth(update):
-        return
     try:
-        args = context.args
-        if len(args) != 1:
-            await update.effective_message.reply_text('Usage: /download <video_link>')
+        if not await check_auth(update):
             return
-        video_link = args[0]
+
+        if not context.args or len(context.args) != 1:
+            await update.effective_message.reply_text(DOWNLOAD_USAGE)
+            return
+
+        video_link = context.args[0]
         if await download_video(update, context, video_link):
             temp_video_path = os.path.join("temp", "temp_video.mp4")
             await send_or_upload_video(temp_video_path, update, context)
+
     except Exception as e:
-        logger.error(f"Download error: {e}")
-        await update.effective_message.reply_text(f"Download error: {e}")
+        await send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
     finally:
         cleanup_temp_files()

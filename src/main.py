@@ -1,60 +1,74 @@
 #!/usr/bin/env python
 import os
-import logging
 import signal
 import asyncio
+from contextlib import asynccontextmanager
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 from bot.commands import start, help_command, cut, download, button
 from bot.utils import process_progress_updates
+from bot.logger_config import setup_logger
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-# Suppress extra logs from third-party modules
-logging.getLogger("httpx").setLevel(logging.ERROR)
-aps_logger = logging.getLogger("apscheduler.scheduler")
-aps_logger.setLevel(logging.ERROR)
-class SuppressMaxInstancesFilter(logging.Filter):
-    def filter(self, record):
-        return "maximum number of running instances reached" not in record.getMessage()
-aps_logger.addFilter(SuppressMaxInstancesFilter())
+logger = setup_logger(__name__)
 
-progress_job_running = False
+class ProgressState:
+    """Class to manage progress job state."""
+    def __init__(self):
+        self.running = False
+
+    @asynccontextmanager
+    async def lock(self):
+        """Context manager for progress job execution."""
+        if self.running:
+            logger.debug("Skipping progress job; previous task in progress")
+            yield False
+            return
+        self.running = True
+        try:
+            yield True
+        finally:
+            self.running = False
+
+# Create global state manager
+progress_state = ProgressState()
 
 async def progress_job(context):
-    global progress_job_running
-    if progress_job_running:
-        context.application.logger.debug("Skipping progress job; previous task in progress")
-        return
-    progress_job_running = True
-    try:
-        await process_progress_updates(context.application)
-    except Exception as e:
-        context.application.logger.error(f"Progress update error: {e}")
-    finally:
-        progress_job_running = False
+    """Handle progress updates."""
+    async with progress_state.lock() as acquired:
+        if not acquired:
+            return
+        try:
+            await process_progress_updates(context.application)
+        except Exception as e:
+            context.application.logger.error(f"Progress update error: {e}")
 
 def shutdown_signal(signum, frame):
+    """Handle shutdown signals."""
     logger.info(f"Signal {signal.Signals(signum).name} received. Shutting down...")
 
 def main():
+    """Initialize and run the bot."""
     TOKEN = os.getenv("TOKEN")
     if not TOKEN:
         logger.error("Bot token not set.")
         return
+
     application = Application.builder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cut", cut))
-    application.add_handler(CommandHandler("download", download))
-    application.add_handler(CallbackQueryHandler(button))
+    # Register command handlers
+    handlers = [
+        CommandHandler("start", start),
+        CommandHandler("help", help_command),
+        CommandHandler("cut", cut),
+        CommandHandler("download", download),
+        CallbackQueryHandler(button)
+    ]
+    for handler in handlers:
+        application.add_handler(handler)
 
+    # Schedule progress updates
     application.job_queue.run_repeating(
         progress_job,
         interval=1.0,
@@ -62,6 +76,7 @@ def main():
         name="progress_job"
     )
 
+    # Setup signal handlers
     signal.signal(signal.SIGINT, shutdown_signal)
     signal.signal(signal.SIGTERM, shutdown_signal)
 

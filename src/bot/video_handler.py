@@ -1,112 +1,123 @@
-import logging
 import os
-import time
 import asyncio
 import yt_dlp
-from yt_dlp.utils import download_range_func
 import aiohttp
+from typing import Optional
+from pathlib import Path
+
 from telegram import Update
 from telegram.ext import ContextTypes
-from .utils import progress_hook
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from .utils import progress_hook, convert_to_seconds
+from .logger_config import setup_logger
+from .video_config import (
+    get_ydl_opts, TEMP_DIR, TEMP_VIDEO_FILENAME,
+    MAX_DIRECT_UPLOAD_SIZE, UPLOAD_CONFIG
 )
-logger = logging.getLogger(__name__)
 
-TEMP_DIR = "temp"
-os.makedirs(TEMP_DIR, exist_ok=True)
+logger = setup_logger(__name__)
 
-def cleanup_temp_files(pattern="temp_video*"):
+class VideoProcessingError(Exception):
+    """Base exception for video processing errors."""
+    pass
+
+class DownloadError(VideoProcessingError):
+    """Raised when video download fails."""
+    pass
+
+class UploadError(VideoProcessingError):
+    """Raised when video upload fails."""
+    pass
+
+def ensure_temp_dir():
+    """Ensure temporary directory exists."""
+    Path(TEMP_DIR).mkdir(exist_ok=True)
+
+def get_temp_path(filename: str = TEMP_VIDEO_FILENAME) -> str:
+    """Get full path for temporary file."""
+    return str(Path(TEMP_DIR) / filename)
+
+def cleanup_temp_files(pattern: str = "temp_video*") -> None:
     """Clean temporary files matching the pattern."""
     try:
-        for file in os.listdir(TEMP_DIR):
-            if file.startswith(pattern.replace("*", "")):
-                try:
-                    os.remove(os.path.join(TEMP_DIR, file))
-                    logger.info(f"Temp file removed: {file}")
-                except Exception as e:
-                    logger.error(f"Error deleting {file}: {e}")
+        temp_dir = Path(TEMP_DIR)
+        if not temp_dir.exists():
+            return
+            
+        for file in temp_dir.glob(pattern):
+            try:
+                file.unlink()
+                logger.info(f"Removed temp file: {file}")
+            except Exception as e:
+                logger.error(f"Error deleting {file}: {e}")
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
 
-async def upload_to_tempsh(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def upload_to_tempsh(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """Upload file to temp.sh and return the download URL."""
-    try:
-        # Upload initiated.
-        message = await update.message.reply_text('Upload started...')
-        message_id = message.message_id
-
-        async with aiohttp.ClientSession() as session:
-            with open(file_path, 'rb') as file:
-                data = aiohttp.FormData()
-                data.add_field('file', file, filename='video.mp4')
-                for attempt in range(3):
-                    try:
-                        async with session.post('https://temp.sh/upload', data=data) as response:
-                            if response.status == 200:
-                                upload_url = await response.text()
-                                logger.info(f"Upload successful, URL: {upload_url}")
-                                return upload_url
-                            elif response.status == 502 and attempt < 2:
-                                logger.warning(f"Upload failed with status {response.status}. Retrying...")
-                                await asyncio.sleep(5)
-                            else:
-                                logger.error(f"Upload failed with status {response.status}")
-                                return None
-                    except Exception as e:
-                        if attempt < 2:
-                            logger.warning(f"Upload error: {e}. Retrying...")
-                            await asyncio.sleep(5)
+    message = await update.message.reply_text('Upload started...')
+    
+    async with aiohttp.ClientSession() as session:
+        with open(file_path, 'rb') as file:
+            data = aiohttp.FormData()
+            data.add_field('file', file, filename='video.mp4')
+            
+            for attempt in range(UPLOAD_CONFIG['max_retries']):
+                try:
+                    async with session.post(UPLOAD_CONFIG['upload_url'], data=data) as response:
+                        if response.status == 200:
+                            upload_url = await response.text()
+                            logger.info(f"Upload successful: {upload_url}")
+                            return upload_url
+                        elif response.status == 502 and attempt < UPLOAD_CONFIG['max_retries'] - 1:
+                            logger.warning(f"Upload failed (attempt {attempt + 1})")
+                            await asyncio.sleep(UPLOAD_CONFIG['retry_delay'])
                         else:
-                            raise
-    except Exception as e:
-        logger.error(f"Upload error: {e}")
-        return None
+                            raise UploadError(f"Upload failed with status {response.status}")
+                except Exception as e:
+                    if attempt < UPLOAD_CONFIG['max_retries'] - 1:
+                        logger.warning(f"Upload error (attempt {attempt + 1}): {e}")
+                        await asyncio.sleep(UPLOAD_CONFIG['retry_delay'])
+                    else:
+                        raise UploadError(f"Upload failed after {UPLOAD_CONFIG['max_retries']} attempts: {e}")
+    
+    raise UploadError("Upload failed: maximum retries exceeded")
 
-async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, video_link: str, start_time: str = None, duration_seconds: int = None) -> bool:
-    """Download video using yt_dlp; if start_time and duration_seconds are provided, download segment."""
+async def download_video(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    video_link: str,
+    start_time: Optional[str] = None,
+    duration_seconds: Optional[int] = None
+) -> bool:
+    """Download video using yt-dlp with optional time range."""
+    ensure_temp_dir()
+    message = await update.message.reply_text('Download started...')
+    message_id = message.message_id
+
     try:
-        message = await update.message.reply_text('Download started...')
-        message_id = message.message_id
-
-        temp_video_path = os.path.join(TEMP_DIR, 'temp_video.mp4')
+        temp_video_path = get_temp_path()
         start_seconds = None
 
-        if start_time is not None and duration_seconds is not None:
+        if start_time and duration_seconds:
             try:
-                from .utils import convert_to_seconds
                 start_seconds = convert_to_seconds(start_time)
                 if start_seconds < 0:
                     raise ValueError("Start time cannot be negative")
                 if duration_seconds <= 0:
                     raise ValueError("Duration must be positive")
-                logger.info(f"Download segment: start_seconds={start_seconds}, duration_seconds={duration_seconds}")
-            except Exception as e:
-                logger.error(f"Time format error: {e}")
-                await update.message.reply_text("Invalid time format. Use HH:MM:SS, MM:SS, or SS")
-                return False
+                logger.info(f"Download segment: start={start_seconds}s, duration={duration_seconds}s")
+            except ValueError as e:
+                raise DownloadError(f"Invalid time format: {e}")
 
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': temp_video_path,
-            'force_keyframes_at_cuts': True,
-            'progress_hooks': [lambda d: progress_hook(d, update, context, message_id)],
-            'force_generic_extractor': False,
-            'fragment_retries': 10,
-            'ignoreerrors': False,
-            'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
-            'postprocessor_args': ['-avoid_negative_ts', 'make_zero']
-        }
-        if start_seconds is not None and duration_seconds is not None:
-            ydl_opts['download_ranges'] = download_range_func([], [[start_seconds, start_seconds + duration_seconds]])
+        ydl_opts = get_ydl_opts(
+            temp_video_path,
+            lambda d: progress_hook(d, update, context, message_id),
+            start_seconds,
+            duration_seconds
+        )
 
-        logger.info(f"Downloading video: {video_link}")
-        if start_time is not None and duration_seconds is not None:
-            logger.info(f"Segment parameters: start={start_time}, duration={duration_seconds}s")
-        logger.info(f"yt_dlp options: {ydl_opts}")
-
+        logger.info(f"Downloading: {video_link}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_link])
 
@@ -116,32 +127,38 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, vid
             text='Download complete.'
         )
         return True
-    except Exception as e:
-        logger.error(f"Download error: {e}")
-        await update.message.reply_text(f"Download error: {e}")
-        return False
 
-async def send_or_upload_video(file_path: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    except Exception as e:
+        raise DownloadError(f"Download failed: {e}")
+
+async def send_or_upload_video(
+    file_path: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Send video directly if small, otherwise upload to temp.sh and send link."""
     try:
         file_size = os.path.getsize(file_path)
-        if file_size < 50 * 1024 * 1024:
+        
+        if file_size < MAX_DIRECT_UPLOAD_SIZE:
             with open(file_path, 'rb') as video_file:
-                await context.bot.send_video(chat_id=update.message.chat_id, video=video_file)
-            logger.info(f"Video sent to chat {update.message.chat_id}")
+                await context.bot.send_video(
+                    chat_id=update.message.chat_id,
+                    video=video_file
+                )
+            logger.info(f"Video sent directly to chat {update.message.chat_id}")
         else:
             upload_url = await upload_to_tempsh(file_path, update, context)
             if upload_url:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text=f"File too large. Download from: {upload_url}"
+                    text=f"File too large for direct upload. Download from: {upload_url}"
                 )
-                logger.info(f"Video uploaded for chat {update.message.chat_id}")
+                logger.info(f"Video link sent to chat {update.message.chat_id}")
             else:
-                await context.bot.send_message(chat_id=update.message.chat_id, text="Upload failed.")
-                logger.error(f"Upload failed for chat {update.message.chat_id}")
+                raise UploadError("Failed to get upload URL")
+                
     except Exception as e:
-        logger.error(f"Send video error: {e}")
-        await update.message.reply_text(f"Send video error: {e}")
+        raise VideoProcessingError(f"Failed to send video: {e}")
     finally:
         cleanup_temp_files()
