@@ -76,8 +76,8 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, vid
 
         if start_time is not None and duration_seconds is not None:
             try:
-                start_parts = [int(x) for x in start_time.split(':')]
-                start_seconds = start_parts[0] * 3600 + start_parts[1] * 60 + start_parts[2]
+                from .utils import convert_to_seconds
+                start_seconds = convert_to_seconds(start_time)
                 if start_seconds < 0:
                     raise ValueError("Start time cannot be negative")
                 if duration_seconds <= 0:
@@ -85,7 +85,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, vid
                 logger.info(f"Download segment: start_seconds={start_seconds}, duration_seconds={duration_seconds}")
             except Exception as e:
                 logger.error(f"Time format error: {e}")
-                await update.message.reply_text("Invalid time format. Use HH:MM:SS")
+                await update.message.reply_text("Invalid time format. Use HH:MM:SS, MM:SS, or SS")
                 return False
 
         ydl_opts = {

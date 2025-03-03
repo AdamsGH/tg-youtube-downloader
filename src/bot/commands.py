@@ -32,7 +32,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Commands:\n"
         "/start - Start bot\n"
-        "/cut <video_link> <start_time> <duration> - Cut video\n"
+        "/cut <video_link> <start_time> <end_time> - Cut video (time format: HH:MM:SS, MM:SS, or SS)\n"
         "/download <video_link> - Download video\n"
         "/help - Show this message"
     )
@@ -43,7 +43,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == 'cut':
-        await query.edit_message_text(text="Usage: /cut <video_link> <start_time> <duration>")
+        await query.edit_message_text(text="Usage: /cut <video_link> <start_time> <end_time>")
     elif query.data == 'download':
         await query.edit_message_text(text="Usage: /download <video_link>")
 
@@ -65,7 +65,7 @@ async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         args = context.args
         if len(args) != 3:
-            await update.effective_message.reply_text('Usage: /cut <video_link> <start_time> <duration>')
+            await update.effective_message.reply_text('Usage: /cut <video_link> <start_time> <end_time>')
             return
         video_link, start_time, end_time = args
         try:
@@ -81,7 +81,7 @@ async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Cutting video from {start_time} to {end_time} (Duration: {duration_formatted})"
             )
         except ValueError as e:
-            await update.effective_message.reply_text(f"Time error: {e}. Use HH:MM:SS.")
+            await update.effective_message.reply_text(f"Time error: {e}. Use HH:MM:SS, MM:SS, or SS format.")
             return
         logger.info(f"Cut: {video_link}, start: {start_time}, duration: {duration_seconds}s")
         if not await download_video(update, context, video_link, start_time, duration_seconds):
