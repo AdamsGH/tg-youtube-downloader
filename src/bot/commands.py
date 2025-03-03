@@ -77,14 +77,14 @@ class Commands:
     """Bot command implementations."""
 
     @staticmethod
-    async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def help_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """Send help message."""
         if not await CommandHandler.check_auth(update):
             return
         await update.effective_message.reply_text(HELP_TEXT)
 
     @staticmethod
-    async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle button clicks."""
         query = update.callback_query
         await query.answer()
@@ -98,7 +98,7 @@ class Commands:
             await query.edit_message_text(text=usage_messages[query.data])
 
     @staticmethod
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """Send start menu."""
         if not await CommandHandler.check_auth(update):
             return

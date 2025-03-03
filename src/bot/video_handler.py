@@ -69,22 +69,9 @@ class VideoProcessor:
     @staticmethod
     async def upload_to_tempsh(
         file_path: str,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
+        update: Update
     ) -> str:
-        """Upload file to temp.sh.
-        
-        Args:
-            file_path: Path to file for upload
-            update: Telegram update object
-            context: Bot context
-            
-        Returns:
-            Download URL for uploaded file
-            
-        Raises:
-            UploadError: If upload fails
-        """
+        """Upload file to temp.sh and return download URL."""
         message = await update.message.reply_text('Upload started...')
         
         async with aiohttp.ClientSession() as session:
@@ -149,7 +136,7 @@ class VideoProcessor:
 
             ydl_opts = get_download_options(
                 output_path=temp_video_path,
-                progress_hook=lambda d: progress_hook(d, update, context, message_id),
+                progress_hook=lambda d: progress_hook(d, update, message_id),
                 start_seconds=start_seconds,
                 duration_seconds=duration_seconds
             )
@@ -205,7 +192,7 @@ class VideoProcessor:
                 logger.info(f"Video sent directly to chat {update.message.chat_id}")
             else:
                 loop = asyncio.get_event_loop()
-                upload_task = asyncio.create_task(cls.upload_to_tempsh(file_path, update, context))
+                upload_task = asyncio.create_task(cls.upload_to_tempsh(file_path, update))
                 upload_url = await upload_task
                 
                 if upload_url:

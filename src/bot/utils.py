@@ -79,11 +79,10 @@ def convert_to_seconds(time_str: str) -> int:
 
 class ProgressBar:
     """Progress bar with Telegram updates."""
-    def __init__(self, total: int, update: Update, context: ContextTypes.DEFAULT_TYPE, message_id: int):
+    def __init__(self, total: int, update: Update, message_id: int):
         """Initialize progress tracking."""
         self.bar = tqdm(total=total, unit='B', unit_scale=True)
         self.update = update
-        self.context = context
         self.message_id = message_id
 
     def update_progress(self, current: int) -> None:
@@ -102,16 +101,16 @@ class ProgressBar:
         """Close progress bar."""
         self.bar.close()
 
-async def create_callback(encoder: Any, update: Update, context: ContextTypes.DEFAULT_TYPE, message_id: int):
+async def create_callback(encoder: Any, update: Update, message_id: int):
     """Create upload progress callback."""
-    progress = ProgressBar(encoder.len, update, context, message_id)
+    progress = ProgressBar(encoder.len, update, message_id)
     
     async def callback(monitor):
         progress.update_progress(monitor.bytes_read)
     
     return callback
 
-def progress_hook(d: Dict[str, Any], update: Update, context: ContextTypes.DEFAULT_TYPE, message_id: int) -> None:
+def progress_hook(d: Dict[str, Any], update: Update, message_id: int) -> None:
     """Track and report download progress."""
     if d['status'] == 'downloading':
         try:
