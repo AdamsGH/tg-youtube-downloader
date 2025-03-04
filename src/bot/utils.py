@@ -62,6 +62,17 @@ class ProgressManager:
 # Global progress manager instance
 progress_manager = ProgressManager()
 
+def extract_timestamp_from_url(url: str) -> int:
+    """Extract timestamp from YouTube URL."""
+    try:
+        # Match t=XX or start=XX parameter
+        time_param = re.search(r'[?&](t|start)=(\d+)', url)
+        if time_param:
+            return int(time_param.group(2))
+        return 0
+    except (ValueError, AttributeError):
+        return 0
+
 def convert_to_seconds(time_str: str) -> int:
     """Parse time string (HH:MM:SS, MM:SS, SS) to seconds."""
     try:

@@ -3,10 +3,17 @@
 import os
 import signal
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import (
+    Application, 
+    CommandHandler, 
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
+)
 
 from config.logging import configure_logger
 from bot.commands import Commands
+from bot.utils import extract_timestamp_from_url
 from bot.utils import process_progress_updates
 
 logger = configure_logger(__name__)
@@ -29,7 +36,15 @@ class BotApplication:
             CommandHandler("help", Commands.help_command),
             CommandHandler("cut", Commands.cut),
             CommandHandler("download", Commands.download),
-            CallbackQueryHandler(Commands.button)
+            CallbackQueryHandler(Commands.button),
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND & filters.Regex(r'https?://(?:www\.)?youtu(?:\.be|be\.com)'),
+                Commands.handle_video_link
+            ),
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND & filters.Regex(r'^\d{1,2}:\d{2}:\d{2}$|^\d{1,2}:\d{2}$|^\d+$'),
+                Commands.handle_end_time
+            )
         ]
         for handler in handlers:
             self.application.add_handler(handler)

@@ -24,6 +24,8 @@ DOWNLOAD_ERROR: Final = "Download error: {}"
 
 # Progress messages
 CUTTING_VIDEO: Final = "Cutting video from {} to {} (Duration: {})"
+ENTER_END_TIME: Final = "Enter end time (format: HH:MM:SS, MM:SS or SS):"
+PROCESSING_VIDEO: Final = "Processing video..."
 
 # File handling
 TEMP_DIR: Final[Path] = Path("temp")

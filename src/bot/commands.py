@@ -13,9 +13,10 @@ from telegram.ext import ContextTypes
 from config.logging import configure_logger
 from config.constants import (
     UNAUTHORIZED_MESSAGE, HELP_TEXT, CUT_USAGE, DOWNLOAD_USAGE,
-    SELECT_COMMAND, TIME_ERROR, CUT_ERROR, DOWNLOAD_ERROR, CUTTING_VIDEO
+    SELECT_COMMAND, TIME_ERROR, CUT_ERROR, DOWNLOAD_ERROR, CUTTING_VIDEO,
+    ENTER_END_TIME, PROCESSING_VIDEO
 )
-from .utils import convert_to_seconds
+from .utils import convert_to_seconds, extract_timestamp_from_url
 from .video_handler import VideoProcessor
 
 logger = configure_logger(__name__)
@@ -129,6 +130,131 @@ class Commands:
 
             logger.info(f"Cut: {video_link}, start: {start_time}, duration: {duration_seconds}s")
             
+            async def download_task():
+                try:
+                    result = await VideoProcessor.download_video(
+                        update=update,
+                        context=context,
+                        video_link=video_link,
+                        start_time=str(start_seconds),
+                        duration_seconds=duration_seconds
+                    )
+                    if result.success:
+                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
+                    else:
+                        await CommandHandler.send_error_message(
+                            update, CUT_ERROR.format(result.error_message)
+                        )
+                except Exception as e:
+                    await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
+
+            asyncio.create_task(download_task())
+
+        except Exception as e:
+            await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
+
+    @staticmethod
+    async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Process video link from message."""
+        try:
+            if not await CommandHandler.check_auth(update):
+                return
+
+            message_parts = update.message.text.strip().split()
+            video_link = message_parts[0]
+            start_time = extract_timestamp_from_url(video_link)
+
+            if start_time > 0:
+                # Link contains timestamp
+                if len(message_parts) > 1:
+                    # End time provided in message
+                    end_time = message_parts[1]
+                    try:
+                        start_seconds, duration_seconds = await CommandHandler.validate_cut_params(
+                            str(start_time), end_time
+                        )
+                        
+                        duration_formatted = CommandHandler.format_duration(duration_seconds)
+                        await update.message.reply_text(
+                            CUTTING_VIDEO.format(start_time, end_time, duration_formatted)
+                        )
+
+                        async def download_task():
+                            try:
+                                result = await VideoProcessor.download_video(
+                                    update=update,
+                                    context=context,
+                                    video_link=video_link,
+                                    start_time=str(start_seconds),
+                                    duration_seconds=duration_seconds
+                                )
+                                if result.success:
+                                    await VideoProcessor.send_or_upload_video(result.file_path, update, context)
+                                else:
+                                    await CommandHandler.send_error_message(
+                                        update, CUT_ERROR.format(result.error_message)
+                                    )
+                            except Exception as e:
+                                await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
+
+                        asyncio.create_task(download_task())
+                        return
+                    except Exception as e:
+                        await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
+                        return
+
+                # No end time, ask for it
+                reply = await update.message.reply_text(ENTER_END_TIME)
+                context.user_data['video_link'] = video_link
+                context.user_data['start_time'] = start_time
+                context.user_data['reply_message_id'] = reply.message_id
+                return
+
+            # No timestamp, just download
+            await update.message.reply_text(PROCESSING_VIDEO)
+            async def download_task():
+                try:
+                    result = await VideoProcessor.download_video(update, context, video_link)
+                    if result.success:
+                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
+                    else:
+                        await CommandHandler.send_error_message(
+                            update, DOWNLOAD_ERROR.format(result.error_message)
+                        )
+                except Exception as e:
+                    await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
+
+            asyncio.create_task(download_task())
+
+        except Exception as e:
+            await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
+
+    @staticmethod
+    async def handle_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Process end time response for video cutting."""
+        try:
+            if not await CommandHandler.check_auth(update):
+                return
+
+            if 'video_link' not in context.user_data:
+                return
+
+            video_link = context.user_data['video_link']
+            start_time = context.user_data['start_time']
+            end_time = update.message.text.strip()
+
+            # Clean up stored data
+            context.user_data.clear()
+
+            start_seconds, duration_seconds = await CommandHandler.validate_cut_params(
+                str(start_time), end_time
+            )
+            
+            duration_formatted = CommandHandler.format_duration(duration_seconds)
+            await update.message.reply_text(
+                CUTTING_VIDEO.format(start_time, end_time, duration_formatted)
+            )
+
             async def download_task():
                 try:
                     result = await VideoProcessor.download_video(
