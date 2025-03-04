@@ -187,7 +187,6 @@ class VideoProcessor:
                     )
                 logger.info(f"Video sent directly to chat {update.message.chat_id}")
             else:
-                loop = asyncio.get_event_loop()
                 upload_task = asyncio.create_task(cls.upload_to_tempsh(file_path, update))
                 upload_url = await upload_task
                 

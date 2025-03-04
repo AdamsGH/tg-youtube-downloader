@@ -55,7 +55,7 @@ class BotApplication:
         except Exception as e:
             context.application.logger.error(f"Progress update error: {e}")
 
-    def _shutdown_signal(self, signum: int, frame) -> None:
+    def _shutdown_signal(self, signum, _) -> None:
         """Clean shutdown on system signals."""
         logger.info(f"Signal {signal.Signals(signum).name} received. Shutting down...")
 
