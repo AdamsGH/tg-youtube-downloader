@@ -6,7 +6,7 @@ from yt_dlp.utils import download_range_func
 @dataclass
 class VideoFormat:
     """Video format settings."""
-    format: str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+    format: str = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b'  # Предпочитаем mp4, но с фоллбэком на другие форматы
     force_generic_extractor: bool = False
     fragment_retries: int = 10
     ignore_errors: bool = False
@@ -18,7 +18,7 @@ class ExtractorConfig:
 
     def __post_init__(self):
         if self.youtube_skip is None:
-            self.youtube_skip = ['dash', 'hls']
+            self.youtube_skip = ['dash']  # Разрешаем HLS форматы
 
     def get_args(self) -> Dict[str, Any]:
         return {'youtube': {'skip': self.youtube_skip}}
