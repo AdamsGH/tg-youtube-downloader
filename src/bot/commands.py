@@ -1,5 +1,10 @@
-"""Bot command handlers."""
-from typing import List
+"""
+Bot command handlers.
+
+This module contains the implementation of all bot commands and message handlers,
+including video processing operations and user interaction flows.
+"""
+from typing import List, Tuple, Optional, Callable, Awaitable, Dict, Any
 import os
 import asyncio
 
@@ -17,21 +22,42 @@ from config.constants import (
     ENTER_END_TIME, PROCESSING_VIDEO
 )
 from .utils import convert_to_seconds, extract_timestamp_from_url
-from .video_handler import VideoProcessor
+from .video_handler import VideoProcessor, VideoProcessingResult
 
 logger = configure_logger(__name__)
 
+# Type aliases for better readability
+VideoTaskCallback = Callable[[Update, ContextTypes.DEFAULT_TYPE, str, Optional[int], Optional[int]], Awaitable[VideoProcessingResult]]
+
 class CommandHandler:
-    """Command processing utilities."""
+    """
+    Command processing utilities.
+    
+    This class provides helper methods for command processing,
+    including user authentication, error handling, and time formatting.
+    """
 
     @staticmethod
     def get_allowed_users() -> List[str]:
-        """Get allowed user IDs."""
+        """
+        Get list of allowed user IDs from environment variables.
+        
+        Returns:
+            List of user IDs that are authorized to use the bot
+        """
         return os.getenv('ALLOWED_USER_IDS', '').split(',')
 
     @classmethod
     async def check_auth(cls, update: Update) -> bool:
-        """Check if user is authorized."""
+        """
+        Check if the user is authorized to use the bot.
+        
+        Args:
+            update: Telegram update object containing user information
+            
+        Returns:
+            True if user is authorized, False otherwise
+        """
         user_id = str(update.effective_user.id)
         if user_id not in cls.get_allowed_users():
             await update.effective_message.reply_text(UNAUTHORIZED_MESSAGE)
@@ -40,22 +66,48 @@ class CommandHandler:
 
     @staticmethod
     async def send_error_message(update: Update, error: Exception) -> None:
-        """Send error to user."""
+        """
+        Send error message to user and log the error.
+        
+        Args:
+            update: Telegram update object
+            error: Exception that occurred
+        """
         error_message = str(error)
         logger.error(error_message)
         await update.effective_message.reply_text(error_message)
 
     @staticmethod
     def format_duration(seconds: int) -> str:
-        """Format seconds to HH:MM:SS."""
+        """
+        Format seconds to HH:MM:SS format.
+        
+        Args:
+            seconds: Duration in seconds
+            
+        Returns:
+            Formatted time string in HH:MM:SS format
+        """
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
         seconds = seconds % 60
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     @staticmethod
-    async def validate_cut_params(start_time: str, end_time: str) -> tuple[int, int]:
-        """Validate and convert video cut times."""
+    async def validate_cut_params(start_time: str, end_time: str) -> Tuple[int, int]:
+        """
+        Validate and convert video cut times.
+        
+        Args:
+            start_time: Start time in HH:MM:SS, MM:SS, or SS format
+            end_time: End time in HH:MM:SS, MM:SS, or SS format
+            
+        Returns:
+            Tuple of (start_seconds, duration_seconds)
+            
+        Raises:
+            ValueError: If times are invalid or end time is not after start time
+        """
         try:
             start_seconds = convert_to_seconds(start_time)
             end_seconds = convert_to_seconds(end_time)
@@ -71,18 +123,35 @@ class CommandHandler:
             raise ValueError(TIME_ERROR.format(str(e)))
 
 class Commands:
-    """Bot command implementations."""
+    """
+    Bot command implementations.
+    
+    This class contains all the command handlers and message processors
+    for the Telegram bot, implementing the core functionality.
+    """
 
     @staticmethod
     async def help_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send help message."""
+        """
+        Send help message with available commands.
+        
+        Args:
+            update: Telegram update object
+            _: Context object (unused)
+        """
         if not await CommandHandler.check_auth(update):
             return
         await update.effective_message.reply_text(HELP_TEXT)
 
     @staticmethod
     async def button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle button clicks."""
+        """
+        Handle inline button clicks.
+        
+        Args:
+            update: Telegram update object containing callback query
+            _: Context object (unused)
+        """
         query = update.callback_query
         await query.answer()
         
@@ -96,7 +165,13 @@ class Commands:
 
     @staticmethod
     async def start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send start menu."""
+        """
+        Send start menu with command options.
+        
+        Args:
+            update: Telegram update object
+            _: Context object (unused)
+        """
         if not await CommandHandler.check_auth(update):
             return
             
@@ -110,8 +185,63 @@ class Commands:
         await update.effective_message.reply_text(SELECT_COMMAND, reply_markup=reply_markup)
 
     @staticmethod
+    async def _create_video_processing_task(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        video_link: str,
+        start_seconds: Optional[int] = None,
+        duration_seconds: Optional[int] = None,
+        error_template: str = CUT_ERROR
+    ) -> None:
+        """
+        Create and run an asynchronous video processing task.
+        
+        Args:
+            update: Telegram update object
+            context: Bot context
+            video_link: URL of the video to process
+            start_seconds: Start time in seconds (for cutting)
+            duration_seconds: Duration in seconds (for cutting)
+            error_template: Error message template to use
+            
+        Note: This is a private helper method used by multiple command handlers.
+        """
+        async def download_task():
+            try:
+                # Convert start_seconds to string if provided
+                start_time_str = str(start_seconds) if start_seconds is not None else None
+                
+                result = await VideoProcessor.download_video(
+                    update=update,
+                    context=context,
+                    video_link=video_link,
+                    start_time=start_time_str,
+                    duration_seconds=duration_seconds
+                )
+                
+                if result.success:
+                    await VideoProcessor.send_or_upload_video(result.file_path, update, context)
+                else:
+                    await CommandHandler.send_error_message(
+                        update, error_template.format(result.error_message)
+                    )
+            except Exception as e:
+                await CommandHandler.send_error_message(update, error_template.format(str(e)))
+
+        # Create and start the task
+        asyncio.create_task(download_task())
+
+    @staticmethod
     async def cut(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Process video cutting."""
+        """
+        Process video cutting command.
+        
+        Format: /cut <video_link> <start_time> <end_time>
+        
+        Args:
+            update: Telegram update object
+            context: Bot context with command arguments
+        """
         try:
             if not await CommandHandler.check_auth(update):
                 return
@@ -130,32 +260,33 @@ class Commands:
 
             logger.info(f"Cut: {video_link}, start: {start_time}, duration: {duration_seconds}s")
             
-            async def download_task():
-                try:
-                    result = await VideoProcessor.download_video(
-                        update=update,
-                        context=context,
-                        video_link=video_link,
-                        start_time=str(start_seconds),
-                        duration_seconds=duration_seconds
-                    )
-                    if result.success:
-                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
-                    else:
-                        await CommandHandler.send_error_message(
-                            update, CUT_ERROR.format(result.error_message)
-                        )
-                except Exception as e:
-                    await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
-
-            asyncio.create_task(download_task())
+            await Commands._create_video_processing_task(
+                update=update,
+                context=context,
+                video_link=video_link,
+                start_seconds=start_seconds,
+                duration_seconds=duration_seconds,
+                error_template=CUT_ERROR
+            )
 
         except Exception as e:
             await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
 
     @staticmethod
     async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Process video link from message."""
+        """
+        Process video link sent as a message.
+        
+        This handler processes YouTube links sent directly as messages,
+        extracting timestamps if present and handling different scenarios:
+        1. Link with timestamp + end time in message: Cut video
+        2. Link with timestamp only: Ask for end time
+        3. Link without timestamp: Download full video
+        
+        Args:
+            update: Telegram update object
+            context: Bot context
+        """
         try:
             if not await CommandHandler.check_auth(update):
                 return
@@ -179,25 +310,14 @@ class Commands:
                             CUTTING_VIDEO.format(start_time, end_time, duration_formatted)
                         )
 
-                        async def download_task():
-                            try:
-                                result = await VideoProcessor.download_video(
-                                    update=update,
-                                    context=context,
-                                    video_link=video_link,
-                                    start_time=str(start_seconds),
-                                    duration_seconds=duration_seconds
-                                )
-                                if result.success:
-                                    await VideoProcessor.send_or_upload_video(result.file_path, update, context)
-                                else:
-                                    await CommandHandler.send_error_message(
-                                        update, CUT_ERROR.format(result.error_message)
-                                    )
-                            except Exception as e:
-                                await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
-
-                        asyncio.create_task(download_task())
+                        await Commands._create_video_processing_task(
+                            update=update,
+                            context=context,
+                            video_link=video_link,
+                            start_seconds=start_seconds,
+                            duration_seconds=duration_seconds,
+                            error_template=CUT_ERROR
+                        )
                         return
                     except Exception as e:
                         await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
@@ -212,26 +332,28 @@ class Commands:
 
             # No timestamp, just download
             await update.message.reply_text(PROCESSING_VIDEO)
-            async def download_task():
-                try:
-                    result = await VideoProcessor.download_video(update, context, video_link)
-                    if result.success:
-                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
-                    else:
-                        await CommandHandler.send_error_message(
-                            update, DOWNLOAD_ERROR.format(result.error_message)
-                        )
-                except Exception as e:
-                    await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
-
-            asyncio.create_task(download_task())
+            await Commands._create_video_processing_task(
+                update=update,
+                context=context,
+                video_link=video_link,
+                error_template=DOWNLOAD_ERROR
+            )
 
         except Exception as e:
             await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
 
     @staticmethod
     async def handle_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Process end time response for video cutting."""
+        """
+        Process end time response for video cutting.
+        
+        This handler is triggered when a user sends a time format message
+        after being prompted for an end time in the video cutting flow.
+        
+        Args:
+            update: Telegram update object
+            context: Bot context containing stored video link and start time
+        """
         try:
             if not await CommandHandler.check_auth(update):
                 return
@@ -255,32 +377,29 @@ class Commands:
                 CUTTING_VIDEO.format(start_time, end_time, duration_formatted)
             )
 
-            async def download_task():
-                try:
-                    result = await VideoProcessor.download_video(
-                        update=update,
-                        context=context,
-                        video_link=video_link,
-                        start_time=str(start_seconds),
-                        duration_seconds=duration_seconds
-                    )
-                    if result.success:
-                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
-                    else:
-                        await CommandHandler.send_error_message(
-                            update, CUT_ERROR.format(result.error_message)
-                        )
-                except Exception as e:
-                    await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
-
-            asyncio.create_task(download_task())
+            await Commands._create_video_processing_task(
+                update=update,
+                context=context,
+                video_link=video_link,
+                start_seconds=start_seconds,
+                duration_seconds=duration_seconds,
+                error_template=CUT_ERROR
+            )
 
         except Exception as e:
             await CommandHandler.send_error_message(update, CUT_ERROR.format(str(e)))
 
     @staticmethod
     async def download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Process video download."""
+        """
+        Process video download command.
+        
+        Format: /download <video_link>
+        
+        Args:
+            update: Telegram update object
+            context: Bot context with command arguments
+        """
         try:
             if not await CommandHandler.check_auth(update):
                 return
@@ -291,19 +410,12 @@ class Commands:
 
             video_link = context.args[0]
             
-            async def download_task():
-                try:
-                    result = await VideoProcessor.download_video(update, context, video_link)
-                    if result.success:
-                        await VideoProcessor.send_or_upload_video(result.file_path, update, context)
-                    else:
-                        await CommandHandler.send_error_message(
-                            update, DOWNLOAD_ERROR.format(result.error_message)
-                        )
-                except Exception as e:
-                    await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
-
-            asyncio.create_task(download_task())
+            await Commands._create_video_processing_task(
+                update=update,
+                context=context,
+                video_link=video_link,
+                error_template=DOWNLOAD_ERROR
+            )
 
         except Exception as e:
             await CommandHandler.send_error_message(update, DOWNLOAD_ERROR.format(str(e)))
