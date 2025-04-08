@@ -3,10 +3,11 @@ from typing import Any, Callable, Dict, Optional, List
 from dataclasses import dataclass
 from yt_dlp.utils import download_range_func
 
-@dataclass
+@dataclass 
 class VideoFormat:
     """Video format settings."""
-    format: str = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b'  # Предпочитаем mp4, но с фоллбэком на другие форматы
+    # Используем legacy форматы, которые лучше работают с частичной загрузкой
+    format: str = '22/18'  # 720p/360p MP4 с встроенным аудио
     force_generic_extractor: bool = False
     fragment_retries: int = 10
     ignore_errors: bool = False
@@ -18,7 +19,7 @@ class ExtractorConfig:
 
     def __post_init__(self):
         if self.youtube_skip is None:
-            self.youtube_skip = ['dash']  # Разрешаем HLS форматы
+            self.youtube_skip = ['dash', 'hls']  # Пропускаем проблемные форматы
 
     def get_args(self) -> Dict[str, Any]:
         return {'youtube': {'skip': self.youtube_skip}}
@@ -52,26 +53,31 @@ def get_download_options(
     opts = {
         'format': video_format.format,
         'outtmpl': output_path,
-        'force_keyframes_at_cuts': True,
         'progress_hooks': [progress_hook],
-        'force_generic_extractor': video_format.force_generic_extractor,
-        'fragment_retries': video_format.fragment_retries,
-        'ignoreerrors': video_format.ignore_errors,
-        'extractor_args': extractor_config.get_args(),
-        'postprocessor_args': post_processor_config.args,
-        # Подавление лишних логов
+        
+        # Базовые опции
+        'retries': 10,
+        'fragment_retries': 10,
+        
+        # Отключаем сложную обработку видео
+        'prefer_ffmpeg': False,
+        'youtube_include_dash_manifest': False,
+        
+        # Настройки для частичной загрузки
+        'http_chunk_size': 10485760,  # 10MB
+        
+        # Подавление логов
         'quiet': True,
-        'no_warnings': True,
-        'ffmpeg_location': None,  # Использовать системный ffmpeg
-        'ffmpeg': {
-            'loglevel': 'error',  # Только ошибки от ffmpeg
-            'hide_banner': True,   # Скрыть баннер ffmpeg
-        }
+        'no_warnings': True
     }
 
     if start_seconds is not None and duration_seconds is not None:
-        opts['download_ranges'] = download_range_func(
-            [], [[start_seconds, start_seconds + duration_seconds]]
-        )
+        opts.update({
+            'download_ranges': download_range_func(
+                [], [[start_seconds, start_seconds + duration_seconds]]
+            ),
+            'force_keyframes_at_cuts': False,
+            'external_downloader': 'native'
+        })
 
     return opts

@@ -1,5 +1,5 @@
 python-telegram-bot[job-queue]
-yt_dlp
+yt_dlp >= 2025.3.31
 tqdm
 requests_toolbelt
 aiohttp
